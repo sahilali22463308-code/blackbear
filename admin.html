@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlackBear Admin</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      color: #111;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: auto;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.08);
+    }
+
+    h1, h2 {
+      margin-top: 0;
+    }
+
+    input, textarea, button, select {
+      width: 100%;
+      padding: 12px;
+      margin-top: 8px;
+      margin-bottom: 12px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    button {
+      background: #111;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover {
+      opacity: .9;
+    }
+
+    .danger {
+      background: #c62828;
+    }
+
+    .logout {
+      background: #555;
+      width: auto;
+      padding: 10px 18px;
+      float: right;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .product,
+    .order {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 12px;
+      background: #fafafa;
+    }
+
+    .product img {
+      width: 100px;
+      height: 100px;
+      object-fit: cover;
+      border-radius: 8px;
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    .message {
+      padding: 10px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background: #eee;
+      display: none;
+    }
+
+    .top {
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    <div id="loginBox" class="card">
+      <h1>BlackBear Admin Login</h1>
+
+      <div id="loginMessage" class="message"></div>
+
+      <form id="loginForm">
+        <label>Email</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="Admin email"
+          required
+        >
+
+        <label>Password</label>
+        <input
+          id="password"
+          type="password"
+          placeholder="Password"
+          required
+        >
+
+        <button type="submit">Login</button>
+      </form>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+
+      <div class="card top">
+        <button id="logoutBtn" class="logout">Logout</button>
+        <h1>BlackBear Admin Panel</h1>
+        <p>Manage products and orders.</p>
+      </div>
+
+      <div class="card">
+        <h2>Add Product</h2>
+
+        <div id="productMessage" class="message"></div>
+
+        <form id="productForm">
+
+          <label>Product Name</label>
+          <input id="productName" type="text" required>
+
+          <label>Description</label>
+          <textarea id="productDescription"></textarea>
+
+          <label>Price</label>
+          <input id="productPrice" type="number" min="0" step="0.01" required>
+
+          <label>Image URL</label>
+          <input
+            id="productImage"
+            type="url"
+            placeholder="https://..."
+          >
+
+          <label>Sizes</label>
+          <input
+            id="productSizes"
+            type="text"
+            value="S,M,L,XL"
+            placeholder="S,M,L,XL"
+          >
+
+          <label>Stock</label>
+          <input id="productStock" type="number" min="0" value="0">
+
+          <label>Badge</label>
+          <input
+            id="productBadge"
+            type="text"
+            placeholder="NEW"
+          >
+
+          <button type="submit">Add Product</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Products</h2>
+        <div id="productsList">Loading...</div>
+      </div>
+
+      <div class="card">
+        <h2>Orders</h2>
+        <div id="ordersList">Loading...</div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+
+  <script>
+    let currentSession = null;
+
+    const loginBox = document.getElementById("loginBox");
+    const adminPanel = document.getElementById("adminPanel");
+    const loginForm = document.getElementById("loginForm");
+    const logoutBtn = document.getElementById("logoutBtn");
+
+    const loginMessage = document.getElementById("loginMessage");
+    const productMessage = document.getElementById("productMessage");
+
+    function showMessage(element, text) {
+      element.textContent = text;
+      element.style.display = "block";
+    }
+
+    function hideMessage(element) {
+      element.textContent = "";
+      element.style.display = "none";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function showAdmin() {
+      loginBox.classList.add("hidden");
+      adminPanel.classList.remove("hidden");
+      render();
+    }
+
+    function showLogin() {
+      adminPanel.classList.add("hidden");
+      loginBox.classList.remove("hidden");
+      currentSession = null;
+    }
+
+    loginForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+
+      hideMessage(loginMessage);
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      try {
+        await BlackBearStore.signIn(email, password);
+
+        const session = await BlackBearStore.checkAdmin();
+
+        if (!session) {
+          throw new Error("This account is not an admin.");
+        }
+
+        currentSession = session;
+        showAdmin();
+
+      } catch (error) {
+        showMessage(
+          loginMessage,
+          error.message || "Login failed."
+        );
+      }
+    });
+
+    logoutBtn.addEventListener("click", async function () {
+      try {
+        await BlackBearStore.signOut();
+      } catch (error) {
+        console.log(error);
+      }
+
+      showLogin();
+    });
+
+    document
+      .getElementById("productForm")
+      .addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        hideMessage(productMessage);
+
+        const name =
+          document.getElementById("productName").value.trim();
+
+        const description =
+          document.getElementById("productDescription").value.trim();
+
+        const price =
+          Number(document.getElementById("productPrice").value);
+
+        const image_url =
+          document.getElementById("productImage").value.trim();
+
+        const sizesText =
+          document.getElementById("productSizes").value.trim();
+
+        const stock =
+          Number(document.getElementById("productStock").value || 0);
+
+        const badge =
+          document.getElementById("productBadge").value.trim();
+
+        const sizes = sizesText
+          ? sizesText
+              .split(",")
+              .map(function (size) {
+                return size.trim();
+              })
+              .filter(Boolean)
+          : ["S", "M", "L", "XL"];
+
+        try {
+          await BlackBearStore.addProduct({
+            name: name,
+            description: description,
+            price: price,
+            image_url: image_url,
+            sizes: sizes,
+            stock: stock,
+            badge: badge
+          });
+
+          showMessage(
+            productMessage,
+            "Product added successfully."
+          );
+
+          document.getElementById("productForm").reset();
+          document.getElementById("productSizes").value =
+            "S,M,L,XL";
+
+          await render();
+
+        } catch (error) {
+          showMessage(
+            productMessage,
+            error.message || "Could not add product."
+          );
+        }
+      });
+
+    async function deleteProduct(id) {
+      if (!confirm("Delete this product?")) {
+        return;
+      }
+
+      try {
+        await BlackBearStore.deleteProduct(id);
+        await render();
+      } catch (error) {
+        alert(error.message || "Could not delete product.");
+      }
+    }
+
+    async function renderProducts() {
+      const box = document.getElementById("productsList");
+
+      try {
+        const products = await BlackBearStore.getProducts();
+
+        if (!products.length) {
+          box.innerHTML = "<p>No products found.</p>";
+          return;
+        }
+
+        box.innerHTML = products.map(function (product) {
+          const image = product.image_url
+            ? '<img src="' +
+              escapeHtml(product.image_url) +
+              '" alt="' +
+              escapeHtml(product.name) +
+              '">'
+            : "";
+
+          return `
+            <div class="product">
+              ${image}
+              <h3>${escapeHtml(product.name)}</h3>
+              <p>${escapeHtml(product.description)}</p>
+              <p><strong>Price:</strong> ${escapeHtml(product.price)}</p>
+              <p><strong>Stock:</strong> ${escapeHtml(product.stock)}</p>
+              <p><strong>Sizes:</strong> ${escapeHtml(
+                (product.sizes || []).join(", ")
+              )}</p>
+              <p><strong>Badge:</strong> ${escapeHtml(
+                product.badge || ""
+              )}</p>
+              <button
+                class="danger"
+                onclick="deleteProduct('${escapeHtml(product.id)}')"
+              >
+                Delete
+              </button>
+            </div>
+          `;
+        }).join("");
+
+      } catch (error) {
+        box.innerHTML =
+          "<p>Error: " +
+          escapeHtml(error.message) +
+          "</p>";
+      }
+    }
+
+    async function renderOrders() {
+      const box = document.getElementById("ordersList");
+
+      try {
+        const orders = await BlackBearStore.getOrders();
+
+        if (!orders.length) {
+          box.innerHTML = "<p>No orders found.</p>";
+          return;
+        }
+
+        box.innerHTML = orders.map(function (order) {
+          return `
+            <div class="order">
+              <h3>Order #${escapeHtml(order.id)}</h3>
+              <p><strong>Name:</strong> ${escapeHtml(order.customer_name)}</p>
+              <p><strong>Phone:</strong> ${escapeHtml(order.phone)}</p>
+              <p><strong>Address:</strong> ${escapeHtml(order.address)}</p>
+              <p><strong>City:</strong> ${escapeHtml(order.city)}</p>
+              <p><strong>Total:</strong> ${escapeHtml(order.total)}</p>
+              <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+              <p><strong>Items:</strong></p>
+              <pre>${escapeHtml(
+                JSON.stringify(order.items, null, 2)
+              )}</pre>
+            </div>
+          `;
+        }).join("");
+
+      } catch (error) {
+        box.innerHTML =
+          "<p>Error: " +
+          escapeHtml(error.message) +
+          "</p>";
+      }
+    }
+
+    async function render() {
+      await renderProducts();
+      await renderOrders();
+    }
+
+    (async function () {
+      try {
+        const session =
+          await BlackBearStore.checkAdmin();
+
+        if (session) {
+          currentSession = session;
+          showAdmin();
+        }
+      } catch (error) {
+        console.log(error);
+      }
+    })();
+  </script>
+</body>
+</html>
